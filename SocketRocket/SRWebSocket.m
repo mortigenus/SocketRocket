@@ -178,32 +178,35 @@ typedef void (^data_callback)(SRWebSocket *webSocket,  NSData *data);
 
 @interface SRWebSocket ()  <NSStreamDelegate>
 
-- (void)_writeData:(NSData *)data;
-- (void)_closeWithProtocolError:(NSString *)message;
-- (void)_failWithError:(NSError *)error;
+- (void)sr_writeData:(NSData *)data;
+- (void)sr_closeWithProtocolError:(NSString *)message;
+- (void)sr_failWithError:(NSError *)error;
 
-- (void)_disconnect;
+- (void)sr_disconnect;
 
-- (void)_readFrameNew;
-- (void)_readFrameContinue;
+- (void)sr_readFrameNew;
+- (void)sr_readFrameContinue;
 
-- (void)_pumpScanner;
+- (void)sr_pumpScanner;
 
-- (void)_pumpWriting;
+- (void)sr_pumpWriting;
 
-- (void)_addConsumerWithScanner:(stream_scanner)consumer callback:(data_callback)callback;
-- (void)_addConsumerWithDataLength:(size_t)dataLength callback:(data_callback)callback readToCurrentFrame:(BOOL)readToCurrentFrame unmaskBytes:(BOOL)unmaskBytes;
-- (void)_addConsumerWithScanner:(stream_scanner)consumer callback:(data_callback)callback dataLength:(size_t)dataLength;
-- (void)_readUntilBytes:(const void *)bytes length:(size_t)length callback:(data_callback)dataHandler;
-- (void)_readUntilHeaderCompleteWithCallback:(data_callback)dataHandler;
+- (void)sr_addConsumerWithScanner:(stream_scanner)consumer callback:(data_callback)callback;
+- (void)sr_addConsumerWithDataLength:(size_t)dataLength
+                            callback:(data_callback)callback
+                  readToCurrentFrame:(BOOL)readToCurrentFrame
+                         unmaskBytes:(BOOL)unmaskBytes;
+- (void)sr_addConsumerWithScanner:(stream_scanner)consumer callback:(data_callback)callback dataLength:(size_t)dataLength;
+- (void)sr_readUntilBytes:(const void *)bytes length:(size_t)length callback:(data_callback)dataHandler;
+- (void)sr_readUntilHeaderCompleteWithCallback:(data_callback)dataHandler;
 
-- (void)_sendFrameWithOpcode:(SROpCode)opcode data:(id)data;
+- (void)sr_sendFrameWithOpcode:(SROpCode)opcode data:(id)data;
 
-- (BOOL)_checkHandshake:(CFHTTPMessageRef)httpMessage;
-- (void)_SR_commonInit;
+- (BOOL)sr_checkHandshake:(CFHTTPMessageRef)httpMessage;
+- (void)sr_commonInit;
 
-- (void)_initializeStreams;
-- (void)_connect;
+- (void)sr_initializeStreams;
+- (void)sr_connect;
 
 @property (nonatomic) SRReadyState readyState;
 
@@ -292,8 +295,8 @@ static __strong NSData *CRLFCRLF;
         _urlRequest = request;
         
         _requestedProtocols = [protocols copy];
-        
-        [self _SR_commonInit];
+
+        [self sr_commonInit];
     }
     
     return self;
@@ -315,7 +318,7 @@ static __strong NSData *CRLFCRLF;
     return [self initWithURLRequest:request protocols:protocols];
 }
 
-- (void)_SR_commonInit;
+- (void)sr_commonInit;
 {
     
     NSString *scheme = _url.scheme.lowercaseString;
@@ -347,8 +350,8 @@ static __strong NSData *CRLFCRLF;
     _consumerPool = [[SRIOConsumerPool alloc] init];
     
     _scheduledRunloops = [[NSMutableSet alloc] init];
-    
-    [self _initializeStreams];
+
+    [self sr_initializeStreams];
     
     // default handlers
 }
@@ -398,8 +401,8 @@ static __strong NSData *CRLFCRLF;
     NSAssert(_readyState == SR_CONNECTING, @"Cannot call -(void)open on SRWebSocket more than once");
 
     _selfRetain = self;
-    
-    [self _connect];
+
+    [self sr_connect];
 }
 
 // Calls block on delegate queue
@@ -426,7 +429,7 @@ static __strong NSData *CRLFCRLF;
     _delegateDispatchQueue = queue;
 }
 
-- (BOOL)_checkHandshake:(CFHTTPMessageRef)httpMessage;
+- (BOOL)sr_checkHandshake:(CFHTTPMessageRef)httpMessage;
 {
     NSString *acceptHeader = CFBridgingRelease(CFHTTPMessageCopyHeaderFieldValue(httpMessage, CFSTR("Sec-WebSocket-Accept")));
 
@@ -446,12 +449,21 @@ static __strong NSData *CRLFCRLF;
     
     if (responseCode >= 400) {
         SRFastLog(@"Request failed with response code %d", responseCode);
-        [self _failWithError:[NSError errorWithDomain:SRWebSocketErrorDomain code:2132 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"received bad response code from server %ld", (long)responseCode], SRHTTPResponseErrorKey:@(responseCode)}]];
+        [self sr_failWithError:[NSError errorWithDomain:SRWebSocketErrorDomain
+                                                   code:2132
+                                               userInfo:@{
+                                                       NSLocalizedDescriptionKey : [NSString stringWithFormat:@"received bad response code from server %ld",
+                                                                                                              (long)responseCode],
+                                                       SRHTTPResponseErrorKey    : @(responseCode)
+                                               }]];
         return;
     }
     
-    if(![self _checkHandshake:_receivedHTTPHeaders]) {
-        [self _failWithError:[NSError errorWithDomain:SRWebSocketErrorDomain code:2133 userInfo:[NSDictionary dictionaryWithObject:[NSString stringWithFormat:@"Invalid Sec-WebSocket-Accept response"] forKey:NSLocalizedDescriptionKey]]];
+    if(![self sr_checkHandshake:_receivedHTTPHeaders]) {
+        [self sr_failWithError:[NSError errorWithDomain:SRWebSocketErrorDomain
+                                                   code:2133
+                                               userInfo:[NSDictionary dictionaryWithObject:[NSString stringWithFormat:@"Invalid Sec-WebSocket-Accept response"]
+                                                                                    forKey:NSLocalizedDescriptionKey]]];
         return;
     }
     
@@ -459,7 +471,10 @@ static __strong NSData *CRLFCRLF;
     if (negotiatedProtocol) {
         // Make sure we requested the protocol
         if ([_requestedProtocols indexOfObject:negotiatedProtocol] == NSNotFound) {
-            [self _failWithError:[NSError errorWithDomain:SRWebSocketErrorDomain code:2133 userInfo:[NSDictionary dictionaryWithObject:[NSString stringWithFormat:@"Server specified Sec-WebSocket-Protocol that wasn't requested"] forKey:NSLocalizedDescriptionKey]]];
+            [self sr_failWithError:[NSError errorWithDomain:SRWebSocketErrorDomain
+                                                       code:2133
+                                                   userInfo:[NSDictionary dictionaryWithObject:[NSString stringWithFormat:@"Server specified Sec-WebSocket-Protocol that wasn't requested"]
+                                                                                        forKey:NSLocalizedDescriptionKey]]];
             return;
         }
         
@@ -469,7 +484,7 @@ static __strong NSData *CRLFCRLF;
     self.readyState = SR_OPEN;
     
     if (!_didFail) {
-        [self _readFrameNew];
+        [self sr_readFrameNew];
     }
 
     [self _performDelegateBlock:^{
@@ -485,10 +500,10 @@ static __strong NSData *CRLFCRLF;
     if (_receivedHTTPHeaders == NULL) {
         _receivedHTTPHeaders = CFHTTPMessageCreateEmpty(NULL, NO);
     }
-                        
-    [self _readUntilHeaderCompleteWithCallback:^(SRWebSocket *self,  NSData *data) {
+
+    [self sr_readUntilHeaderCompleteWithCallback:^(SRWebSocket *self, NSData *data) {
         CFHTTPMessageAppendBytes(_receivedHTTPHeaders, (const UInt8 *)data.bytes, data.length);
-        
+
         if (CFHTTPMessageIsHeaderComplete(_receivedHTTPHeaders)) {
             SRFastLog(@"Finished reading headers %@", CFBridgingRelease(CFHTTPMessageCopyAllHeaderFields(_receivedHTTPHeaders)));
             [self _HTTPHeadersDidFinish];
@@ -539,11 +554,11 @@ static __strong NSData *CRLFCRLF;
     
     CFRelease(request);
 
-    [self _writeData:message];
+    [self sr_writeData:message];
     [self _readHTTPHeader];
 }
 
-- (void)_initializeStreams;
+- (void)sr_initializeStreams;
 {
     assert(_url.port.unsignedIntValue <= UINT32_MAX);
     uint32_t port = _url.port.unsignedIntValue;
@@ -588,7 +603,7 @@ static __strong NSData *CRLFCRLF;
     _outputStream.delegate = self;
 }
 
-- (void)_connect;
+- (void)sr_connect;
 {
     if (!_scheduledRunloops.count) {
         [self scheduleInRunLoop:[NSRunLoop SR_networkRunLoop] forMode:NSDefaultRunLoopMode];
@@ -635,7 +650,7 @@ static __strong NSData *CRLFCRLF;
         SRFastLog(@"Closing with code %d reason %@", code, reason);
         
         if (wasConnecting) {
-            [self _disconnect];
+            [self sr_disconnect];
             return;
         }
 
@@ -660,24 +675,24 @@ static __strong NSData *CRLFCRLF;
                 payload = [payload subdataWithRange:NSMakeRange(0, usedLength + sizeof(uint16_t))];
             }
         }
-        
-        
-        [self _sendFrameWithOpcode:SROpCodeConnectionClose data:payload];
+
+
+        [self sr_sendFrameWithOpcode:SROpCodeConnectionClose data:payload];
     });
 }
 
-- (void)_closeWithProtocolError:(NSString *)message;
+- (void)sr_closeWithProtocolError:(NSString *)message;
 {
     // Need to shunt this on the _callbackQueue first to see if they received any messages 
     [self _performDelegateBlock:^{
         [self closeWithCode:SRStatusCodeProtocolError reason:message];
         dispatch_async(_workQueue, ^{
-            [self _disconnect];
+            [self sr_disconnect];
         });
     }];
 }
 
-- (void)_failWithError:(NSError *)error;
+- (void)sr_failWithError:(NSError *)error;
 {
     dispatch_async(_workQueue, ^{
         if (self.readyState != SR_CLOSED) {
@@ -692,13 +707,13 @@ static __strong NSData *CRLFCRLF;
             _selfRetain = nil;
 
             SRFastLog(@"Failing with error %@", error.localizedDescription);
-            
-            [self _disconnect];
+
+            [self sr_disconnect];
         }
     });
 }
 
-- (void)_writeData:(NSData *)data;
+- (void)sr_writeData:(NSData *)data;
 {    
     [self assertOnWorkQueue];
 
@@ -706,7 +721,7 @@ static __strong NSData *CRLFCRLF;
             return;
     }
     [_outputBuffer appendData:data];
-    [self _pumpWriting];
+    [self sr_pumpWriting];
 }
 
 - (void)send:(id)data;
@@ -716,11 +731,12 @@ static __strong NSData *CRLFCRLF;
     data = [data copy];
     dispatch_async(_workQueue, ^{
         if ([data isKindOfClass:[NSString class]]) {
-            [self _sendFrameWithOpcode:SROpCodeTextFrame data:[(NSString *)data dataUsingEncoding:NSUTF8StringEncoding]];
+            [self sr_sendFrameWithOpcode:SROpCodeTextFrame
+                                    data:[(NSString *)data dataUsingEncoding:NSUTF8StringEncoding]];
         } else if ([data isKindOfClass:[NSData class]]) {
-            [self _sendFrameWithOpcode:SROpCodeBinaryFrame data:data];
+            [self sr_sendFrameWithOpcode:SROpCodeBinaryFrame data:data];
         } else if (data == nil) {
-            [self _sendFrameWithOpcode:SROpCodeTextFrame data:data];
+            [self sr_sendFrameWithOpcode:SROpCodeTextFrame data:data];
         } else {
             assert(NO);
         }
@@ -733,7 +749,7 @@ static __strong NSData *CRLFCRLF;
     // TODO: maybe not copy this for performance
     data = [data copy] ?: [NSData data]; // It's okay for a ping to be empty
     dispatch_async(_workQueue, ^{
-        [self _sendFrameWithOpcode:SROpCodePing data:data];
+        [self sr_sendFrameWithOpcode:SROpCodePing data:data];
     });
 }
 
@@ -742,7 +758,7 @@ static __strong NSData *CRLFCRLF;
     // Need to pingpong this off _callbackQueue first to make sure messages happen in order
     [self _performDelegateBlock:^{
         dispatch_async(_workQueue, ^{
-            [self _sendFrameWithOpcode:SROpCodePong data:pingData];
+            [self sr_sendFrameWithOpcode:SROpCodePong data:pingData];
         });
     }];
 }
@@ -809,19 +825,19 @@ static inline BOOL closeCodeIsValid(int closeCode) {
     
     if (dataSize == 1) {
         // TODO handle error
-        [self _closeWithProtocolError:@"Payload for close must be larger than 2 bytes"];
+        [self sr_closeWithProtocolError:@"Payload for close must be larger than 2 bytes"];
         return;
     } else if (dataSize >= 2) {
         [data getBytes:&closeCode length:sizeof(closeCode)];
         _closeCode = EndianU16_BtoN(closeCode);
         if (!closeCodeIsValid(_closeCode)) {
-            [self _closeWithProtocolError:[NSString stringWithFormat:@"Cannot have close code of %d", _closeCode]];
+            [self sr_closeWithProtocolError:[NSString stringWithFormat:@"Cannot have close code of %d", _closeCode]];
             return;
         }
         if (dataSize > 2) {
             _closeReason = [[NSString alloc] initWithData:[data subdataWithRange:NSMakeRange(2, dataSize - 2)] encoding:NSUTF8StringEncoding];
             if (!_closeReason) {
-                [self _closeWithProtocolError:@"Close reason MUST be valid UTF-8"];
+                [self sr_closeWithProtocolError:@"Close reason MUST be valid UTF-8"];
                 return;
             }
         }
@@ -835,16 +851,16 @@ static inline BOOL closeCodeIsValid(int closeCode) {
         [self closeWithCode:1000 reason:nil];
     }
     dispatch_async(_workQueue, ^{
-        [self _disconnect];
+        [self sr_disconnect];
     });
 }
 
-- (void)_disconnect;
+- (void)sr_disconnect;
 {
     [self assertOnWorkQueue];
     SRFastLog(@"Trying to disconnect");
     _closeWhenFinishedWriting = YES;
-    [self _pumpWriting];
+    [self sr_pumpWriting];
 }
 
 - (void)_handleFrameWithData:(NSData *)frameData opCode:(NSInteger)opcode;
@@ -853,10 +869,10 @@ static inline BOOL closeCodeIsValid(int closeCode) {
     
     BOOL isControlFrame = (opcode == SROpCodePing || opcode == SROpCodePong || opcode == SROpCodeConnectionClose);
     if (!isControlFrame) {
-        [self _readFrameNew];
+        [self sr_readFrameNew];
     } else {
         dispatch_async(_workQueue, ^{
-            [self _readFrameContinue];
+            [self sr_readFrameContinue];
         });
     }
     
@@ -866,7 +882,7 @@ static inline BOOL closeCodeIsValid(int closeCode) {
             if (str == nil && frameData) {
                 [self closeWithCode:SRStatusCodeInvalidUTF8 reason:@"Text frames must be valid UTF-8"];
                 dispatch_async(_workQueue, ^{
-                    [self _disconnect];
+                    [self sr_disconnect];
                 });
 
                 return;
@@ -887,7 +903,7 @@ static inline BOOL closeCodeIsValid(int closeCode) {
             [self handlePong:frameData];
             break;
         default:
-            [self _closeWithProtocolError:[NSString stringWithFormat:@"Unknown opcode %ld", (long)opcode]];
+            [self sr_closeWithProtocolError:[NSString stringWithFormat:@"Unknown opcode %ld", (long)opcode]];
             // TODO: Handle invalid opcode
             break;
     }
@@ -905,12 +921,12 @@ static inline BOOL closeCodeIsValid(int closeCode) {
     BOOL isControlFrame = (frame_header.opcode == SROpCodePing || frame_header.opcode == SROpCodePong || frame_header.opcode == SROpCodeConnectionClose);
     
     if (isControlFrame && !frame_header.fin) {
-        [self _closeWithProtocolError:@"Fragmented control frames not allowed"];
+        [self sr_closeWithProtocolError:@"Fragmented control frames not allowed"];
         return;
     }
     
     if (isControlFrame && frame_header.payload_length >= 126) {
-        [self _closeWithProtocolError:@"Control frames cannot have payloads larger than 126 bytes"];
+        [self sr_closeWithProtocolError:@"Control frames cannot have payloads larger than 126 bytes"];
         return;
     }
     
@@ -927,24 +943,28 @@ static inline BOOL closeCodeIsValid(int closeCode) {
                 [self _handleFrameWithData:_currentFrameData opCode:frame_header.opcode];
             } else {
                 // TODO add assert that opcode is not a control;
-                [self _readFrameContinue];
+                [self sr_readFrameContinue];
             }
         }
     } else {
         assert(frame_header.payload_length <= SIZE_T_MAX);
-        [self _addConsumerWithDataLength:(size_t)frame_header.payload_length callback:^(SRWebSocket *self, NSData *newData) {
-            if (isControlFrame) {
-                [self _handleFrameWithData:newData opCode:frame_header.opcode];
-            } else {
-                if (frame_header.fin) {
-                    [self _handleFrameWithData:self->_currentFrameData opCode:frame_header.opcode];
-                } else {
-                    // TODO add assert that opcode is not a control;
-                    [self _readFrameContinue];
-                }
-                
-            }
-        } readToCurrentFrame:!isControlFrame unmaskBytes:frame_header.masked];
+        [self sr_addConsumerWithDataLength:(size_t)frame_header.payload_length
+                                  callback:^(SRWebSocket *self, NSData *newData) {
+                                      if (isControlFrame) {
+                                          [self _handleFrameWithData:newData opCode:frame_header.opcode];
+                                      } else {
+                                          if (frame_header.fin) {
+                                              [self _handleFrameWithData:self->_currentFrameData
+                                                                  opCode:frame_header.opcode];
+                                          } else {
+                                              // TODO add assert that opcode is not a control;
+                                              [self sr_readFrameContinue];
+                                          }
+
+                                      }
+                                  }
+                        readToCurrentFrame:!isControlFrame
+                               unmaskBytes:frame_header.masked];
     }
 }
 
@@ -977,66 +997,66 @@ static const uint8_t SRMaskMask         = 0x80;
 static const uint8_t SRPayloadLenMask   = 0x7F;
 
 
-- (void)_readFrameContinue;
+- (void)sr_readFrameContinue;
 {
     assert((_currentFrameCount == 0 && _currentFrameOpcode == 0) || (_currentFrameCount > 0 && _currentFrameOpcode > 0));
 
-    [self _addConsumerWithDataLength:2 callback:^(SRWebSocket *self, NSData *data) {
+    [self sr_addConsumerWithDataLength:2 callback:^(SRWebSocket *self, NSData *data) {
         __block frame_header header = {0};
-        
+
         const uint8_t *headerBuffer = data.bytes;
         assert(data.length >= 2);
-        
+
         if (headerBuffer[0] & SRRsvMask) {
-            [self _closeWithProtocolError:@"Server used RSV bits"];
+            [self sr_closeWithProtocolError:@"Server used RSV bits"];
             return;
         }
-        
+
         uint8_t receivedOpcode = (SROpCodeMask & headerBuffer[0]);
-        
+
         BOOL isControlFrame = (receivedOpcode == SROpCodePing || receivedOpcode == SROpCodePong || receivedOpcode == SROpCodeConnectionClose);
-        
+
         if (!isControlFrame && receivedOpcode != 0 && self->_currentFrameCount > 0) {
-            [self _closeWithProtocolError:@"all data frames after the initial data frame must have opcode 0"];
+            [self sr_closeWithProtocolError:@"all data frames after the initial data frame must have opcode 0"];
             return;
         }
-        
+
         if (receivedOpcode == 0 && self->_currentFrameCount == 0) {
-            [self _closeWithProtocolError:@"cannot continue a message"];
+            [self sr_closeWithProtocolError:@"cannot continue a message"];
             return;
         }
-        
+
         header.opcode = receivedOpcode == 0 ? self->_currentFrameOpcode : receivedOpcode;
-        
+
         header.fin = !!(SRFinMask & headerBuffer[0]);
-        
-        
-        header.masked = !!(SRMaskMask & headerBuffer[1]);
+
+
+        header.masked         = !!(SRMaskMask & headerBuffer[1]);
         header.payload_length = SRPayloadLenMask & headerBuffer[1];
-        
+
         headerBuffer = NULL;
-        
+
         if (header.masked) {
-            [self _closeWithProtocolError:@"Client must receive unmasked data"];
+            [self sr_closeWithProtocolError:@"Client must receive unmasked data"];
         }
-        
+
         size_t extra_bytes_needed = header.masked ? sizeof(_currentReadMaskKey) : 0;
-        
+
         if (header.payload_length == 126) {
             extra_bytes_needed += sizeof(uint16_t);
         } else if (header.payload_length == 127) {
             extra_bytes_needed += sizeof(uint64_t);
         }
-        
+
         if (extra_bytes_needed == 0) {
             [self _handleFrameHeader:header curData:self->_currentFrameData];
         } else {
-            [self _addConsumerWithDataLength:extra_bytes_needed callback:^(SRWebSocket *self, NSData *data) {
+            [self sr_addConsumerWithDataLength:extra_bytes_needed callback:^(SRWebSocket *self, NSData *data) {
                 size_t mapped_size = data.length;
-                #pragma unused (mapped_size)
+#pragma unused (mapped_size)
                 const void *mapped_buffer = data.bytes;
-                size_t offset = 0;
-                
+                size_t     offset         = 0;
+
                 if (header.payload_length == 126) {
                     assert(mapped_size >= sizeof(uint16_t));
                     uint16_t newLen = EndianU16_BtoN(*(uint16_t *)(mapped_buffer));
@@ -1049,19 +1069,20 @@ static const uint8_t SRPayloadLenMask   = 0x7F;
                 } else {
                     assert(header.payload_length < 126 && header.payload_length >= 0);
                 }
-                
+
                 if (header.masked) {
                     assert(mapped_size >= sizeof(_currentReadMaskOffset) + offset);
-                    memcpy(self->_currentReadMaskKey, ((uint8_t *)mapped_buffer) + offset, sizeof(self->_currentReadMaskKey));
+                    memcpy(self->_currentReadMaskKey, ((uint8_t *)mapped_buffer) + offset, sizeof(self
+                            ->_currentReadMaskKey));
                 }
-                
+
                 [self _handleFrameHeader:header curData:self->_currentFrameData];
-            } readToCurrentFrame:NO unmaskBytes:NO];
+            }               readToCurrentFrame:NO unmaskBytes:NO];
         }
-    } readToCurrentFrame:NO unmaskBytes:NO];
+    }               readToCurrentFrame:NO unmaskBytes:NO];
 }
 
-- (void)_readFrameNew;
+- (void)sr_readFrameNew;
 {
     dispatch_async(_workQueue, ^{
         [_currentFrameData setLength:0];
@@ -1070,12 +1091,12 @@ static const uint8_t SRPayloadLenMask   = 0x7F;
         _currentFrameCount = 0;
         _readOpCount = 0;
         _currentStringScanPosition = 0;
-        
-        [self _readFrameContinue];
+
+        [self sr_readFrameContinue];
     });
 }
 
-- (void)_pumpWriting;
+- (void)sr_pumpWriting;
 {
     [self assertOnWorkQueue];
     
@@ -1083,7 +1104,10 @@ static const uint8_t SRPayloadLenMask   = 0x7F;
     if (dataLength - _outputBufferOffset > 0 && _outputStream.hasSpaceAvailable) {
         NSInteger bytesWritten = [_outputStream write:_outputBuffer.bytes + _outputBufferOffset maxLength:dataLength - _outputBufferOffset];
         if (bytesWritten == -1) {
-            [self _failWithError:[NSError errorWithDomain:SRWebSocketErrorDomain code:2145 userInfo:[NSDictionary dictionaryWithObject:@"Error writing to stream" forKey:NSLocalizedDescriptionKey]]];
+            [self sr_failWithError:[NSError errorWithDomain:SRWebSocketErrorDomain
+                                                       code:2145
+                                                   userInfo:[NSDictionary dictionaryWithObject:@"Error writing to stream"
+                                                                                        forKey:NSLocalizedDescriptionKey]]];
              return;
         }
         
@@ -1122,37 +1146,40 @@ static const uint8_t SRPayloadLenMask   = 0x7F;
     }
 }
 
-- (void)_addConsumerWithScanner:(stream_scanner)consumer callback:(data_callback)callback;
+- (void)sr_addConsumerWithScanner:(stream_scanner)consumer callback:(data_callback)callback;
 {
     [self assertOnWorkQueue];
-    [self _addConsumerWithScanner:consumer callback:callback dataLength:0];
+    [self sr_addConsumerWithScanner:consumer callback:callback dataLength:0];
 }
 
-- (void)_addConsumerWithDataLength:(size_t)dataLength callback:(data_callback)callback readToCurrentFrame:(BOOL)readToCurrentFrame unmaskBytes:(BOOL)unmaskBytes;
+- (void)sr_addConsumerWithDataLength:(size_t)dataLength
+                            callback:(data_callback)callback
+                  readToCurrentFrame:(BOOL)readToCurrentFrame
+                         unmaskBytes:(BOOL)unmaskBytes;
 {   
     [self assertOnWorkQueue];
     assert(dataLength);
     
     [_consumers addObject:[_consumerPool consumerWithScanner:nil handler:callback bytesNeeded:dataLength readToCurrentFrame:readToCurrentFrame unmaskBytes:unmaskBytes]];
-    [self _pumpScanner];
+    [self sr_pumpScanner];
 }
 
-- (void)_addConsumerWithScanner:(stream_scanner)consumer callback:(data_callback)callback dataLength:(size_t)dataLength;
+- (void)sr_addConsumerWithScanner:(stream_scanner)consumer callback:(data_callback)callback dataLength:(size_t)dataLength;
 {    
     [self assertOnWorkQueue];
     [_consumers addObject:[_consumerPool consumerWithScanner:consumer handler:callback bytesNeeded:dataLength readToCurrentFrame:NO unmaskBytes:NO]];
-    [self _pumpScanner];
+    [self sr_pumpScanner];
 }
 
 
 static const char CRLFCRLFBytes[] = {'\r', '\n', '\r', '\n'};
 
-- (void)_readUntilHeaderCompleteWithCallback:(data_callback)dataHandler;
+- (void)sr_readUntilHeaderCompleteWithCallback:(data_callback)dataHandler;
 {
-    [self _readUntilBytes:CRLFCRLFBytes length:sizeof(CRLFCRLFBytes) callback:dataHandler];
+    [self sr_readUntilBytes:CRLFCRLFBytes length:sizeof(CRLFCRLFBytes) callback:dataHandler];
 }
 
-- (void)_readUntilBytes:(const void *)bytes length:(size_t)length callback:(data_callback)dataHandler;
+- (void)sr_readUntilBytes:(const void *)bytes length:(size_t)length callback:(data_callback)dataHandler;
 {
     // TODO optimize so this can continue from where we last searched
     stream_scanner consumer = ^size_t(NSData *data) {
@@ -1174,7 +1201,7 @@ static const char CRLFCRLFBytes[] = {'\r', '\n', '\r', '\n'};
         }
         return found_size;
     };
-    [self _addConsumerWithScanner:consumer callback:dataHandler];
+    [self sr_addConsumerWithScanner:consumer callback:dataHandler];
 }
 
 
@@ -1257,7 +1284,7 @@ static const char CRLFCRLFBytes[] = {'\r', '\n', '\r', '\n'};
                     if (valid_utf8_size == -1) {
                         [self closeWithCode:SRStatusCodeInvalidUTF8 reason:@"Text frames must be valid UTF-8"];
                         dispatch_async(_workQueue, ^{
-                            [self _disconnect];
+                            [self sr_disconnect];
                         });
                         return didWork;
                     } else {
@@ -1285,7 +1312,7 @@ static const char CRLFCRLFBytes[] = {'\r', '\n', '\r', '\n'};
     return didWork;
 }
 
--(void)_pumpScanner;
+-(void)sr_pumpScanner;
 {
     [self assertOnWorkQueue];
     
@@ -1306,7 +1333,7 @@ static const char CRLFCRLFBytes[] = {'\r', '\n', '\r', '\n'};
 
 static const size_t SRFrameHeaderOverhead = 32;
 
-- (void)_sendFrameWithOpcode:(SROpCode)opcode data:(id)data;
+- (void)sr_sendFrameWithOpcode:(SROpCode)opcode data:(id)data;
 {
     [self assertOnWorkQueue];
     
@@ -1380,8 +1407,8 @@ static const size_t SRFrameHeaderOverhead = 32;
 
     assert(frame_buffer_size <= [frame length]);
     frame.length = frame_buffer_size;
-    
-    [self _writeData:frame];
+
+    [self sr_writeData:frame];
 }
 
 - (void)stream:(NSStream *)aStream handleEvent:(NSStreamEvent)eventCode;
@@ -1411,7 +1438,10 @@ static const size_t SRFrameHeaderOverhead = 32;
             
             if (!_pinnedCertFound) {
                 dispatch_async(_workQueue, ^{
-                    [self _failWithError:[NSError errorWithDomain:SRWebSocketErrorDomain code:23556 userInfo:[NSDictionary dictionaryWithObject:[NSString stringWithFormat:@"Invalid server cert"] forKey:NSLocalizedDescriptionKey]]];
+                    [self sr_failWithError:[NSError errorWithDomain:SRWebSocketErrorDomain
+                                                               code:23556
+                                                           userInfo:[NSDictionary dictionaryWithObject:[NSString stringWithFormat:@"Invalid server cert"]
+                                                                                                forKey:NSLocalizedDescriptionKey]]];
                 });
                 return;
             }
@@ -1430,15 +1460,15 @@ static const size_t SRFrameHeaderOverhead = 32;
                 if (self.readyState == SR_CONNECTING && aStream == _inputStream) {
                     [self didConnect];
                 }
-                [self _pumpWriting];
-                [self _pumpScanner];
+                [self sr_pumpWriting];
+                [self sr_pumpScanner];
                 break;
             }
                 
             case NSStreamEventErrorOccurred: {
                 SRFastLog(@"NSStreamEventErrorOccurred %@ %@", aStream, [[aStream streamError] copy]);
                 /// TODO specify error better!
-                [self _failWithError:aStream.streamError];
+                [self sr_failWithError:aStream.streamError];
                 _readBufferOffset = 0;
                 [_readBuffer setLength:0];
                 break;
@@ -1446,10 +1476,10 @@ static const size_t SRFrameHeaderOverhead = 32;
             }
                 
             case NSStreamEventEndEncountered: {
-                [self _pumpScanner];
+                [self sr_pumpScanner];
                 SRFastLog(@"NSStreamEventEndEncountered %@", aStream);
                 if (aStream.streamError) {
-                    [self _failWithError:aStream.streamError];
+                    [self sr_failWithError:aStream.streamError];
                 } else {
                     if (self.readyState != SR_CLOSED) {
                         self.readyState = SR_CLOSED;
@@ -1481,20 +1511,20 @@ static const size_t SRFrameHeaderOverhead = 32;
                     if (bytes_read > 0) {
                         [_readBuffer appendBytes:buffer length:bytes_read];
                     } else if (bytes_read < 0) {
-                        [self _failWithError:_inputStream.streamError];
+                        [self sr_failWithError:_inputStream.streamError];
                     }
                     
                     if (bytes_read != bufferSize) {
                         break;
                     }
                 };
-                [self _pumpScanner];
+                [self sr_pumpScanner];
                 break;
             }
                 
             case NSStreamEventHasSpaceAvailable: {
                 SRFastLog(@"NSStreamEventHasSpaceAvailable %@", aStream);
-                [self _pumpWriting];
+                [self sr_pumpWriting];
                 break;
             }
                 
